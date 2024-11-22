@@ -106,13 +106,28 @@ func main() {
 	keyOnly := flag.Bool("k", false, "key only")
 	valueOnly := flag.Bool("r", false, "value only")
 	countOnly := flag.Bool("c", false, "count only")
+	filter := flag.String("f", "", "filter keys")
 	flag.Parse()
 	check.T(flag.NArg() == 2).F("usage: key_re value_re")
 	keyRe := regexp.MustCompile(flag.Arg(0))
 	valRe := regexp.MustCompile(flag.Arg(1))
+	var filterRe *regexp.Regexp
+	if *filter != "" {
+		filterRe = regexp.MustCompile(strings.Replace(*filter, "/", "[.]", -1))
+	}
 
 	js := loadJSON()
 	matched := walkObjectTree(nil, "", js, func(key string, v any) bool { return matchValue(keyRe, valRe, key, v) })
+
+	if filterRe != nil {
+		var m []jsonEntry
+		for _, je := range matched {
+			if filterRe.MatchString(je.Key) {
+				m = append(m, je)
+			}
+		}
+		matched = m
+	}
 
 	switch {
 	case *keyOnly:
