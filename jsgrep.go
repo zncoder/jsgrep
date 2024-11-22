@@ -101,22 +101,26 @@ func matchValue(keyRe, valRe *regexp.Regexp, key string, val any) bool {
 	return false
 }
 
-func matchJSON(keyRe, valRe *regexp.Regexp, indent bool) {
-	js := loadJSON()
-	matched := walkObjectTree(nil, "", js, func(key string, v any) bool { return matchValue(keyRe, valRe, key, v) })
-	enc := json.NewEncoder(os.Stdout)
-	if indent {
-		enc.SetIndent("", "    ")
-	}
-	check.E(enc.Encode(matched)).F("encode json to stdout")
-}
-
 func main() {
 	indent := flag.Bool("i", false, "indent")
+	valueOnly := flag.Bool("r", false, "value only")
 	flag.Parse()
 	check.T(flag.NArg() == 2).F("usage: key_re value_re")
 	keyRe := regexp.MustCompile(flag.Arg(0))
 	valRe := regexp.MustCompile(flag.Arg(1))
 
-	matchJSON(keyRe, valRe, *indent)
+	js := loadJSON()
+	matched := walkObjectTree(nil, "", js, func(key string, v any) bool { return matchValue(keyRe, valRe, key, v) })
+
+	if *valueOnly {
+		for _, je := range matched {
+			fmt.Println(je.Value)
+		}
+	} else {
+		enc := json.NewEncoder(os.Stdout)
+		if *indent {
+			enc.SetIndent("", "    ")
+		}
+		check.E(enc.Encode(matched)).F("encode json to stdout")
+	}
 }
