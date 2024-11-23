@@ -50,21 +50,51 @@ func (je jsonEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]any{je.Key: je.Value})
 }
 
-func walkObjectTree(keyPrefix []jsonKey, key string, val any, match func(string, any) bool) []jsonEntry {
+type jsonObject struct {
+	Key string
+	Obj map[string]any
+}
+
+func matchObject(obj map[string]any, key string, val any, match func(string, any) bool) bool {
+	for k, sv := range obj {
+		if match(k, sv) {
+			return true
+		}
+	}
+	return false
+}
+
+func walkObjectTree(
+	keyPrefix []jsonKey,
+	key string,
+	val any,
+	match func(string, any) bool,
+) ([]jsonEntry, []jsonObject) {
 	var matched []jsonEntry
+	var objs []jsonObject
 	switch v := val.(type) {
 	case map[string]any:
+		if matchObject(v, key, val, match) {
+			objs = append(objs, jsonObject{Key: toJqKey(keyPrefix), Obj: v})
+		}
+
 		for k, sv := range v {
-			submatched := walkObjectTree(append(keyPrefix, jsonKey{Key: k}), k, sv, match)
+			submatched, subobjs := walkObjectTree(append(keyPrefix, jsonKey{Key: k}), k, sv, match)
 			if len(submatched) > 0 {
 				matched = append(matched, submatched...)
+			}
+			if len(subobjs) > 0 {
+				objs = append(objs, subobjs...)
 			}
 		}
 	case []any:
 		for i, sv := range v {
-			submatched := walkObjectTree(append(keyPrefix, jsonKey{Index: i}), key, sv, match)
+			submatched, subobjs := walkObjectTree(append(keyPrefix, jsonKey{Index: i}), key, sv, match)
 			if len(submatched) > 0 {
 				matched = append(matched, submatched...)
+			}
+			if len(subobjs) > 0 {
+				objs = append(objs, subobjs...)
 			}
 		}
 	case string, json.Number, bool, nil:
@@ -72,7 +102,7 @@ func walkObjectTree(keyPrefix []jsonKey, key string, val any, match func(string,
 			matched = append(matched, jsonEntry{Key: toJqKey(keyPrefix), Value: v})
 		}
 	}
-	return matched
+	return matched, objs
 }
 
 func matchValue(keyRe, valRe *regexp.Regexp, key string, val any) bool {
@@ -102,7 +132,7 @@ func matchValue(keyRe, valRe *regexp.Regexp, key string, val any) bool {
 }
 
 func main() {
-	outputFormat := flag.String("o", "l", "output format: l/line, j/json, i/indent, k/key, c/count, a/array")
+	outputFormat := flag.String("o", "l", "output format: l/line, j/json, i/indent, k/key, c/count, a/array, o/obj")
 	key := flag.String("k", "", "key regexp")
 	value := flag.String("v", "", "value regexp, value is matched as string")
 	filter := flag.String("f", "", "regexp to filter keys, / is replaced with [.]")
@@ -115,7 +145,7 @@ func main() {
 	}
 
 	js := loadJSON()
-	matched := walkObjectTree(nil, "", js, func(key string, v any) bool { return matchValue(keyRe, valRe, key, v) })
+	matched, objs := walkObjectTree(nil, "", js, func(key string, v any) bool { return matchValue(keyRe, valRe, key, v) })
 
 	if filterRe != nil {
 		var m []jsonEntry
@@ -165,6 +195,15 @@ func main() {
 		for _, je := range matched {
 			fmt.Println(je.Value)
 		}
+
+	case "o", "obj":
+		m := make(map[string]any)
+		for _, jo := range objs {
+			m[jo.Key] = jo.Obj
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "    ")
+		check.E(enc.Encode(m)).F("encode json to stdout")
 
 	default:
 		check.T(false).F("unknown format", "arg", *outputFormat)
