@@ -50,11 +50,6 @@ func (je jsonEntry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]any{je.Key: je.Value})
 }
 
-type jsonObject struct {
-	Key string
-	Obj map[string]any
-}
-
 func matchObject(obj map[string]any, key string, val any, match func(string, any) bool) bool {
 	for k, sv := range obj {
 		if match(k, sv) {
@@ -69,13 +64,11 @@ func walkObjectTree(
 	key string,
 	val any,
 	match func(string, any) bool,
-) ([]jsonEntry, []jsonObject) {
-	var matched []jsonEntry
-	var objs []jsonObject
+) (matched []jsonEntry, objs []jsonEntry) {
 	switch v := val.(type) {
 	case map[string]any:
 		if matchObject(v, key, val, match) {
-			objs = append(objs, jsonObject{Key: toJqKey(keyPrefix), Obj: v})
+			objs = append(objs, jsonEntry{Key: toJqKey(keyPrefix), Value: v})
 		}
 
 		for k, sv := range v {
@@ -131,8 +124,16 @@ func matchValue(keyRe, valRe *regexp.Regexp, key string, val any) bool {
 	return false
 }
 
+func entrySliceToMap(jes []jsonEntry) map[string]any {
+	m := make(map[string]any)
+	for _, je := range jes {
+		m[je.Key] = je.Value
+	}
+	return m
+}
+
 func main() {
-	outputFormat := flag.String("o", "l", "output format: l/line, j/json, i/indent, k/key, c/count, a/array, o/obj")
+	outputFormat := flag.String("o", "i", "output format: l/line, j/json, i/indent, k/key, c/count, a/array, o/obj")
 	key := flag.String("k", "", "key regexp")
 	value := flag.String("v", "", "value regexp, value is matched as string")
 	filter := flag.String("f", "", "regexp to filter keys, / is replaced with [.]")
@@ -164,12 +165,12 @@ func main() {
 		}
 
 	case "j", "json":
-		check.E(json.NewEncoder(os.Stdout).Encode(matched)).F("encode json to stdout")
+		check.E(json.NewEncoder(os.Stdout).Encode(entrySliceToMap(matched))).F("encode json to stdout")
 
 	case "i", "indent":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "    ")
-		check.E(enc.Encode(matched)).F("encode json to stdout")
+		check.E(enc.Encode(entrySliceToMap(matched))).F("encode json to stdout")
 
 	case "k", "key":
 		for _, je := range matched {
@@ -197,13 +198,9 @@ func main() {
 		}
 
 	case "o", "obj":
-		m := make(map[string]any)
-		for _, jo := range objs {
-			m[jo.Key] = jo.Obj
-		}
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "    ")
-		check.E(enc.Encode(m)).F("encode json to stdout")
+		check.E(enc.Encode(entrySliceToMap(objs))).F("encode json to stdout")
 
 	default:
 		check.T(false).F("unknown format", "arg", *outputFormat)
