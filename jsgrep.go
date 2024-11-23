@@ -102,15 +102,13 @@ func matchValue(keyRe, valRe *regexp.Regexp, key string, val any) bool {
 }
 
 func main() {
-	indent := flag.Bool("i", false, "indent")
-	keyOnly := flag.Bool("k", false, "key only")
-	valueOnly := flag.Bool("r", false, "value only")
-	countOnly := flag.Bool("c", false, "count only")
-	filter := flag.String("f", "", "filter keys")
+	outputFormat := flag.String("o", "l", "output format: l/line, j/json, i/indent, k/key, c/count, a/array")
+	key := flag.String("k", "", "key regexp")
+	value := flag.String("v", "", "value regexp, value is matched as string")
+	filter := flag.String("f", "", "regexp to filter keys, / is replaced with [.]")
 	flag.Parse()
-	check.T(flag.NArg() == 2).F("usage: key_re value_re")
-	keyRe := regexp.MustCompile(flag.Arg(0))
-	valRe := regexp.MustCompile(flag.Arg(1))
+	keyRe := regexp.MustCompile(*key)
+	valRe := regexp.MustCompile(*value)
 	var filterRe *regexp.Regexp
 	if *filter != "" {
 		filterRe = regexp.MustCompile(strings.Replace(*filter, "/", "[.]", -1))
@@ -129,25 +127,46 @@ func main() {
 		matched = m
 	}
 
-	switch {
-	case *keyOnly:
+	switch *outputFormat {
+	case "l", "line":
+		for _, je := range matched {
+			fmt.Printf("%s %v\n", je.Key, je.Value)
+		}
+
+	case "j", "json":
+		check.E(json.NewEncoder(os.Stdout).Encode(matched)).F("encode json to stdout")
+
+	case "i", "indent":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "    ")
+		check.E(enc.Encode(matched)).F("encode json to stdout")
+
+	case "k", "key":
 		for _, je := range matched {
 			fmt.Println(je.Key)
 		}
 
-	case *valueOnly:
+	case "c", "count":
+		fmt.Println(len(matched))
+
+	case "a", "array":
+		var sb strings.Builder
+		sb.WriteString("[")
+		for i, je := range matched {
+			if i != 0 {
+				sb.WriteString(",")
+			}
+			sb.WriteString(je.Key)
+		}
+		sb.WriteString("]")
+		fmt.Println(sb.String())
+
+	case "v", "value":
 		for _, je := range matched {
 			fmt.Println(je.Value)
 		}
 
-	case *countOnly:
-		fmt.Println(len(matched))
-
 	default:
-		enc := json.NewEncoder(os.Stdout)
-		if *indent {
-			enc.SetIndent("", "    ")
-		}
-		check.E(enc.Encode(matched)).F("encode json to stdout")
+		check.T(false).F("unknown format", "arg", *outputFormat)
 	}
 }
