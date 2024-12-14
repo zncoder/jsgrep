@@ -9,11 +9,18 @@ import (
 	"strings"
 
 	"github.com/zncoder/check"
+	"github.com/zncoder/mygo"
 )
 
 func loadJSON() any {
+	f := os.Stdin
+	if flag.NArg() > 0 {
+		f = check.V(os.Open(flag.Arg(0))).F("open json file")
+		defer f.Close()
+	}
+
 	var js any
-	dec := json.NewDecoder(os.Stdin)
+	dec := json.NewDecoder(f)
 	dec.UseNumber()
 	check.E(dec.Decode(&js)).F("decode json from stdin")
 	return js
@@ -137,7 +144,8 @@ func main() {
 	key := flag.String("k", "", "key regexp")
 	value := flag.String("v", "", "value regexp, value is matched as string")
 	filter := flag.String("f", "", "regexp to filter keys, / is replaced with [.]")
-	flag.Parse()
+	mygo.ParseFlag("[json_file]")
+
 	keyRe := regexp.MustCompile(*key)
 	valRe := regexp.MustCompile(*value)
 	var filterRe *regexp.Regexp
