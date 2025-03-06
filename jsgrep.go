@@ -106,13 +106,13 @@ func walkObjectTree(
 }
 
 func matchValue(keyRe, valRe *regexp.Regexp, key string, val any) bool {
-	if key != "" && !keyRe.MatchString(key) {
+	if key != "" && !keyRe.MatchString(strings.ToLower(key)) {
 		return false
 	}
 
 	switch v := val.(type) {
 	case string:
-		if valRe.MatchString(v) {
+		if valRe.MatchString(strings.ToLower(v)) {
 			return true
 		}
 	case json.Number:
@@ -146,8 +146,8 @@ func main() {
 	filter := flag.String("f", "", "regexp to filter keys, / is replaced with [.]")
 	mygo.ParseFlag("[json_file]")
 
-	keyRe := regexp.MustCompile(*key)
-	valRe := regexp.MustCompile(*value)
+	keyRe := regexp.MustCompile(strings.ToLower(*key))
+	valRe := regexp.MustCompile(strings.ToLower(*value))
 	var filterRe *regexp.Regexp
 	if *filter != "" {
 		filterRe = regexp.MustCompile(strings.Replace(*filter, "/", "[.]", -1))
