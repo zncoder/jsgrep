@@ -26,191 +26,100 @@ func loadJSON() any {
 	return js
 }
 
-type jsonKey struct {
-	Key   string
-	Index int
-}
-
-func (jk jsonKey) String() string {
-	if jk.Key != "" {
-		return jk.Key
-	} else {
-		return fmt.Sprintf("[%d]", jk.Index)
-	}
-}
-
 type jsonEntry struct {
 	Key   string
 	Value any
 }
 
-func toJqKey(keyPrefix []jsonKey) string {
-	var sb strings.Builder
-	for _, k := range keyPrefix {
-		sb.WriteString(".")
-		sb.WriteString(k.String())
-	}
-	return sb.String()
-}
-
-func (je jsonEntry) MarshalJSON() ([]byte, error) {
-	return json.Marshal(map[string]any{je.Key: je.Value})
-}
-
-func matchObject(obj map[string]any, key string, val any, match func(string, any) bool) bool {
-	for k, sv := range obj {
-		if match(k, sv) {
-			return true
+func quoteKey(k string) string {
+	for i, r := range k {
+		switch {
+		case 'a' <= r && r <= 'z', 'A' <= r && r <= 'Z', r == '_':
+		case '0' <= r && r <= '9' && i != 0:
+		default:
+			return fmt.Sprintf(`"%s"`, k)
 		}
 	}
-	return false
+	return k
 }
 
-func walkObjectTree(
-	keyPrefix []jsonKey,
-	key string,
-	val any,
-	match func(string, any) bool,
-) (matched []jsonEntry, objs []jsonEntry) {
-	switch v := val.(type) {
+func flattenJSON(prefix string, js any) []jsonEntry {
+	var entries []jsonEntry
+	switch v := js.(type) {
 	case map[string]any:
-		if matchObject(v, key, val, match) {
-			objs = append(objs, jsonEntry{Key: toJqKey(keyPrefix), Value: v})
-		}
-
 		for k, sv := range v {
-			submatched, subobjs := walkObjectTree(append(keyPrefix, jsonKey{Key: k}), k, sv, match)
-			if len(submatched) > 0 {
-				matched = append(matched, submatched...)
-			}
-			if len(subobjs) > 0 {
-				objs = append(objs, subobjs...)
-			}
+			entries = append(entries, flattenJSON(prefix+"."+quoteKey(k), sv)...)
 		}
 	case []any:
 		for i, sv := range v {
-			submatched, subobjs := walkObjectTree(append(keyPrefix, jsonKey{Index: i}), key, sv, match)
-			if len(submatched) > 0 {
-				matched = append(matched, submatched...)
-			}
-			if len(subobjs) > 0 {
-				objs = append(objs, subobjs...)
-			}
+			entries = append(entries, flattenJSON(fmt.Sprintf("%s[%d]", prefix, i), sv)...)
 		}
 	case string, json.Number, bool, nil:
-		if match(key, v) {
-			matched = append(matched, jsonEntry{Key: toJqKey(keyPrefix), Value: v})
-		}
+		entries = append(entries, jsonEntry{Key: prefix, Value: v})
+	default:
+		check.T(false).F("unknown type", "type", fmt.Sprintf("%T", v))
 	}
-	return matched, objs
+	return entries
 }
 
-func matchValue(keyRe, valRe *regexp.Regexp, key string, val any) bool {
-	if key != "" && !keyRe.MatchString(strings.ToLower(key)) {
-		return false
-	}
+func main() {
+	keyPat := flag.String("k", "", "key regexp, key is flattened in jq key format")
+	valuePat := flag.String("v", "", "value regexp, value is matched as string")
+	mygo.ParseFlag("[json_file]")
 
+	js := loadJSON()
+	flattened := flattenJSON("", js)
+
+	matched := matchEntries(flattened, *keyPat, *valuePat)
+	for _, je := range matched {
+		fmt.Printf("%s %s\n", je.Key, formatValue(je.Value))
+	}
+}
+
+func formatValue(val any) string {
 	switch v := val.(type) {
 	case string:
-		if valRe.MatchString(strings.ToLower(v)) {
-			return true
-		}
+		return fmt.Sprintf("%q", v)
 	case json.Number:
-		if valRe.MatchString(v.String()) {
-			return true
-		}
+		return v.String()
 	case bool:
-		if valRe.MatchString(fmt.Sprintf("%v", v)) {
-			return true
-		}
+		return fmt.Sprintf("%v", v)
 	case nil:
-		if valRe.MatchString("null") {
-			return true
-		}
+		return "null"
+	}
+	return ""
+}
+
+func matchValue(valueRe *regexp.Regexp, val any) bool {
+	switch v := val.(type) {
+	case string:
+		return valueRe.MatchString(strings.ToLower(v))
+	case json.Number:
+		return valueRe.MatchString(v.String())
+	case bool:
+		return valueRe.MatchString(fmt.Sprintf("%v", v))
+	case nil:
+		return valueRe.MatchString("null")
 	}
 	return false
 }
 
-func entrySliceToMap(jes []jsonEntry) map[string]any {
-	m := make(map[string]any)
-	for _, je := range jes {
-		m[je.Key] = je.Value
+func matchEntries(flattened []jsonEntry, keyPat, valuePat string) (matched []jsonEntry) {
+	var keyRe, valueRe *regexp.Regexp
+	if keyPat != "" {
+		keyRe = check.V(regexp.Compile(strings.ToLower(keyPat))).F("compile key regexp")
 	}
-	return m
-}
-
-func main() {
-	outputFormat := flag.String("o", "i", "output format: l/line, j/json, i/indent, k/key, c/count, a/array, o/obj")
-	key := flag.String("k", "", "key regexp")
-	value := flag.String("v", "", "value regexp, value is matched as string")
-	filter := flag.String("f", "", "regexp to filter keys, / is replaced with [.]")
-	mygo.ParseFlag("[json_file]")
-
-	keyRe := regexp.MustCompile(strings.ToLower(*key))
-	valRe := regexp.MustCompile(strings.ToLower(*value))
-	var filterRe *regexp.Regexp
-	if *filter != "" {
-		filterRe = regexp.MustCompile(strings.Replace(*filter, "/", "[.]", -1))
+	if valuePat != "" {
+		valueRe = check.V(regexp.Compile(strings.ToLower(valuePat))).F("compile value regexp")
 	}
-
-	js := loadJSON()
-	matched, objs := walkObjectTree(nil, "", js, func(key string, v any) bool { return matchValue(keyRe, valRe, key, v) })
-
-	if filterRe != nil {
-		var m []jsonEntry
-		for _, je := range matched {
-			if filterRe.MatchString(je.Key) {
-				m = append(m, je)
-			}
+	for _, je := range flattened {
+		switch {
+		case keyRe != nil && !keyRe.MatchString(strings.ToLower(je.Key)),
+			valueRe != nil && !matchValue(valueRe, je.Value):
+			continue
+		default:
+			matched = append(matched, je)
 		}
-		matched = m
 	}
-
-	switch *outputFormat {
-	case "l", "line":
-		for _, je := range matched {
-			fmt.Printf("%s %v\n", je.Key, je.Value)
-		}
-
-	case "j", "json":
-		check.E(json.NewEncoder(os.Stdout).Encode(entrySliceToMap(matched))).F("encode json to stdout")
-
-	case "i", "indent":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "    ")
-		check.E(enc.Encode(entrySliceToMap(matched))).F("encode json to stdout")
-
-	case "k", "key":
-		for _, je := range matched {
-			fmt.Println(je.Key)
-		}
-
-	case "c", "count":
-		fmt.Println(len(matched))
-
-	case "a", "array":
-		var sb strings.Builder
-		sb.WriteString("[")
-		for i, je := range matched {
-			if i != 0 {
-				sb.WriteString(",")
-			}
-			sb.WriteString(je.Key)
-		}
-		sb.WriteString("]")
-		fmt.Println(sb.String())
-
-	case "v", "value":
-		for _, je := range matched {
-			fmt.Println(je.Value)
-		}
-
-	case "o", "obj":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "    ")
-		check.E(enc.Encode(entrySliceToMap(objs))).F("encode json to stdout")
-
-	default:
-		check.T(false).F("unknown format", "arg", *outputFormat)
-	}
+	return matched
 }
