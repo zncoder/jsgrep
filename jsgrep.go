@@ -12,12 +12,14 @@ import (
 	"github.com/zncoder/mygo"
 )
 
-func loadJSON() any {
-	f := os.Stdin
-	if flag.NArg() > 0 {
-		f = check.V(os.Open(flag.Arg(0))).F("open json file")
-		defer f.Close()
+func loadJSON(jsonFile string) any {
+	var f *os.File
+	if jsonFile == "-" {
+		f = os.Stdin
+	} else {
+		f = check.V(os.Open(jsonFile)).F("open json file", "file", jsonFile)
 	}
+	defer f.Close()
 
 	var js any
 	dec := json.NewDecoder(f)
@@ -63,14 +65,34 @@ func flattenJSON(prefix string, js any) []jsonEntry {
 }
 
 func main() {
-	keyPat := flag.String("k", "", "key regexp, key is flattened in jq key format")
-	valuePat := flag.String("v", "", "value regexp, value is matched as string")
-	mygo.ParseFlag("[json_file]")
+	isKey := flag.Bool("k", false, "regexp is key")
+	isVal := flag.Bool("v", false, "regexp is value")
+	jsonFile := flag.String("f", "-", "json file")
+	mygo.ParseFlag("[regexp]")
+	if *isKey || *isVal {
+		check.T(flag.NArg() > 0).F("missing regexp")
+	}
 
-	js := loadJSON()
+	var keyPat, valPat string
+	if *isKey {
+		keyPat = flag.Arg(0)
+	} else if *isVal {
+		valPat = flag.Arg(0)
+	} else if flag.NArg() > 0 {
+		keyPat = flag.Arg(0)
+		valPat = flag.Arg(0)
+	}
+
+	js := loadJSON(*jsonFile)
 	flattened := flattenJSON("", js)
 
-	matched := matchEntries(flattened, *keyPat, *valuePat)
+	var matched []jsonEntry
+	if keyPat == "" && valPat == "" {
+		matched = flattened
+	} else {
+		matched = matchEntries(flattened, keyPat, valPat)
+	}
+
 	for _, je := range matched {
 		fmt.Printf("%s %s\n", je.Key, formatValue(je.Value))
 	}
@@ -114,10 +136,9 @@ func matchEntries(flattened []jsonEntry, keyPat, valuePat string) (matched []jso
 	}
 	for _, je := range flattened {
 		switch {
-		case keyRe != nil && !keyRe.MatchString(strings.ToLower(je.Key)),
-			valueRe != nil && !matchValue(valueRe, je.Value):
-			continue
-		default:
+		case keyRe != nil && keyRe.MatchString(strings.ToLower(je.Key)):
+			matched = append(matched, je)
+		case valueRe != nil && matchValue(valueRe, je.Value):
 			matched = append(matched, je)
 		}
 	}
