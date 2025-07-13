@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -15,7 +17,7 @@ import (
 func loadJSON(jsonFile string) any {
 	var f *os.File
 	if jsonFile == "-" {
-		f = os.Stdin
+		f = maybeLoadCacheFile()
 	} else {
 		f = check.V(os.Open(jsonFile)).F("open json file", "file", jsonFile)
 	}
@@ -26,6 +28,26 @@ func loadJSON(jsonFile string) any {
 	dec.UseNumber()
 	check.E(dec.Decode(&js)).F("decode json from stdin")
 	return js
+}
+
+func cacheFilename() string {
+	cacheFile := os.Getenv("JSGREP_STDIN")
+	if cacheFile == "" {
+		// get user id
+		cacheFile = filepath.Join(os.TempDir(), fmt.Sprintf("jsgrep-stdin-%d.json", os.Getuid()))
+	}
+	return cacheFile
+}
+
+func maybeLoadCacheFile() *os.File {
+	cacheFile := cacheFilename()
+	fi := check.V(os.Stdin.Stat()).F("stat stdin")
+	if fi.Mode()&os.ModeCharDevice == 0 {
+		// If stdin is a pipe, we read from it directly and cache the content.
+		b := check.V(io.ReadAll(os.Stdin)).F("read stdin")
+		check.E(os.WriteFile(cacheFile, b, 0600)).F("write cache file", "file", cacheFile)
+	}
+	return check.V(os.Open(cacheFile)).F("open cache file", "file", cacheFile)
 }
 
 type jsonEntry struct {
