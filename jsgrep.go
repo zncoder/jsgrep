@@ -67,19 +67,31 @@ func quoteKey(k string) string {
 	return k
 }
 
-func flattenJSON(js any, prefix string) []jsonEntry {
+func flattenJSON(js any, prefix, fullKey string) []jsonEntry {
 	var entries []jsonEntry
 	switch v := js.(type) {
 	case map[string]any:
 		for k, sv := range v {
-			entries = append(entries, flattenJSON(sv, prefix+"."+quoteKey(k))...)
+			pk := prefix + "." + quoteKey(k)
+			if pk == fullKey {
+				entries = append(entries, jsonEntry{Key: pk, Value: sv})
+			} else {
+				entries = append(entries, flattenJSON(sv, pk, fullKey)...)
+			}
 		}
 	case []any:
 		for i, sv := range v {
-			entries = append(entries, flattenJSON(sv, fmt.Sprintf("%s[%d]", prefix, i))...)
+			pk := fmt.Sprintf("%s[%d]", prefix, i)
+			if pk == fullKey {
+				entries = append(entries, jsonEntry{Key: pk, Value: sv})
+			} else {
+				entries = append(entries, flattenJSON(sv, pk, fullKey)...)
+			}
 		}
 	case string, json.Number, bool, nil:
-		entries = append(entries, jsonEntry{Key: prefix, Value: v})
+		if fullKey == "" || prefix == fullKey {
+			entries = append(entries, jsonEntry{Key: prefix, Value: v})
+		}
 	default:
 		check.T(false).F("unknown type", "type", fmt.Sprintf("%T", v))
 	}
@@ -101,13 +113,14 @@ func (o Op) V_GrepByValue() {
 }
 
 func (o Op) P_PrintObjects() {
+	indent := flag.Int("i", 4, "indentation for print")
 	mygo.ParseFlag("key...")
-	// printJSONObjects(flag.Args)
+	printJSONObjects(flag.Args(), *indent)
 }
 
 func grepByKeyOrValue(keyPat, valPat string) {
 	js := loadJSON()
-	flattened := flattenJSON(js, "")
+	flattened := flattenJSON(js, "", "")
 
 	var matched []jsonEntry
 	if keyPat == "" && valPat == "" {
@@ -119,6 +132,29 @@ func grepByKeyOrValue(keyPat, valPat string) {
 	for _, je := range matched {
 		fmt.Printf("%s %s\n", je.Key, formatValue(je.Value))
 	}
+}
+
+func printJSONObjects(keys []string, indent int) {
+	var found []any
+	js := loadJSON()
+	for _, k := range keys {
+		obj := getJSONObject(js, k)
+		if check.T(obj != nil).L("key not found", "key", k) {
+			found = append(found, obj)
+		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", strings.Repeat(" ", indent))
+	check.E(enc.Encode(found)).F("encode json objects to stdout", "found", found)
+}
+
+func getJSONObject(js any, key string) any {
+	objs := flattenJSON(js, "", key)
+	check.T(len(objs) <= 1).F("multiple objects found", "key", key, "objs", objs)
+	if len(objs) == 0 {
+		return nil
+	}
+	return objs[0].Value
 }
 
 func main() {
