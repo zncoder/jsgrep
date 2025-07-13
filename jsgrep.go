@@ -67,16 +67,16 @@ func quoteKey(k string) string {
 	return k
 }
 
-func flattenJSON(prefix string, js any) []jsonEntry {
+func flattenJSON(js any, prefix string) []jsonEntry {
 	var entries []jsonEntry
 	switch v := js.(type) {
 	case map[string]any:
 		for k, sv := range v {
-			entries = append(entries, flattenJSON(prefix+"."+quoteKey(k), sv)...)
+			entries = append(entries, flattenJSON(sv, prefix+"."+quoteKey(k))...)
 		}
 	case []any:
 		for i, sv := range v {
-			entries = append(entries, flattenJSON(fmt.Sprintf("%s[%d]", prefix, i), sv)...)
+			entries = append(entries, flattenJSON(sv, fmt.Sprintf("%s[%d]", prefix, i))...)
 		}
 	case string, json.Number, bool, nil:
 		entries = append(entries, jsonEntry{Key: prefix, Value: v})
@@ -107,7 +107,7 @@ func (o Op) P_PrintObjects() {
 
 func grepByKeyOrValue(keyPat, valPat string) {
 	js := loadJSON()
-	flattened := flattenJSON("", js)
+	flattened := flattenJSON(js, "")
 
 	var matched []jsonEntry
 	if keyPat == "" && valPat == "" {
