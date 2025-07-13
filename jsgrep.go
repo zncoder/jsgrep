@@ -14,7 +14,7 @@ import (
 	"github.com/zncoder/mygo"
 )
 
-func loadJSON(jsonFile string) any {
+func loadJSON() any {
 	var f *os.File
 	if jsonFile == "-" {
 		f = maybeLoadCacheFile()
@@ -86,26 +86,27 @@ func flattenJSON(prefix string, js any) []jsonEntry {
 	return entries
 }
 
-func main() {
-	isKey := flag.Bool("k", false, "regexp is key")
-	isVal := flag.Bool("v", false, "regexp is value")
-	jsonFile := flag.String("f", "-", "json file")
-	mygo.ParseFlag("[regexp]")
-	if *isKey || *isVal {
-		check.T(flag.NArg() > 0).F("missing regexp")
-	}
+var jsonFile string
 
-	var keyPat, valPat string
-	if *isKey {
-		keyPat = flag.Arg(0)
-	} else if *isVal {
-		valPat = flag.Arg(0)
-	} else if flag.NArg() > 0 {
-		keyPat = flag.Arg(0)
-		valPat = flag.Arg(0)
-	}
+type Op struct{}
 
-	js := loadJSON(*jsonFile)
+func (o Op) K_GrepByKey() {
+	mygo.ParseFlag("regexp")
+	grepByKeyOrValue(flag.Arg(0), "")
+}
+
+func (o Op) V_GrepByValue() {
+	mygo.ParseFlag("regexp")
+	grepByKeyOrValue("", flag.Arg(0))
+}
+
+func (o Op) P_PrintObjects() {
+	mygo.ParseFlag("key...")
+	// printJSONObjects(flag.Args)
+}
+
+func grepByKeyOrValue(keyPat, valPat string) {
+	js := loadJSON()
 	flattened := flattenJSON("", js)
 
 	var matched []jsonEntry
@@ -118,6 +119,11 @@ func main() {
 	for _, je := range matched {
 		fmt.Printf("%s %s\n", je.Key, formatValue(je.Value))
 	}
+}
+
+func main() {
+	flag.StringVar(&jsonFile, "f", "-", "json file, '-' for stdin")
+	mygo.RunOpMapCmd[Op]()
 }
 
 func formatValue(val any) string {
